@@ -23,22 +23,24 @@ namespace UnitTestProject1
         }
 
         [Test]
-        public void TestMethod1()
+        public async Task TestMethod1()
         {
 
             var manualResetEvent = new ManualResetEvent(false);
+            var manualResetEvent1 = new ManualResetEvent(false);
 
             ServiceMock.Setup(x => x.SubmitFeed()).Callback(() => { manualResetEvent.Set(); }).Throws<Exception>();
 
-            Task.Run(() => { Shop.Perfom(); });
+
+            Task.Run(() => { Shop.Perfom(1); });
 
             manualResetEvent.WaitOne(TimeSpan.FromSeconds(1));
 
-            manualResetEvent.Reset();
+            ServiceMock.Setup(x => x.SubmitFeed()).Callback(() => { manualResetEvent1.Set(); }).Throws<Exception>();
 
-            Task.Run(() => { Shop.Perfom(); });
+            Task.Run(() => { Shop.Perfom(2); });
 
-            manualResetEvent.WaitOne(TimeSpan.FromSeconds(1));
+            manualResetEvent.WaitOne(TimeSpan.FromSeconds(5));
 
             ServiceMock.Verify(x => x.SubmitFeed(), Times.Once);
         }

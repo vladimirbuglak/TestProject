@@ -4,6 +4,6 @@ namespace UnitTestProject1
 {
     public interface IService
     {
-        Task SubmitFeed();
+        void SubmitFeed();
     }
 }
