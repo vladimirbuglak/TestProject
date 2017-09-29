@@ -2,6 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using AO.Clients.Amazon.Domain.Feed;
+using MassTransit;
 using NUnit.Framework;
 
 namespace AO.Clients.Amazon.Tests.BusIntegrationTests
@@ -9,78 +10,73 @@ namespace AO.Clients.Amazon.Tests.BusIntegrationTests
     public class ExceptionFilterIntegrationTests : FilterIntergarationTests
     {
         [Test]
-        public void ExceptionTest()
+        public async Task WhenConsumerThrownStaleObjectStateExceptionExceptionThrown_ThenExecutionShouldBeContinued()
         {
-            ManualResetEvent autoResetEvent1 = new ManualResetEvent(false);
-            ManualResetEvent autoResetEvent2 = new ManualResetEvent(false);
-            ManualResetEvent autoResetEvent3 = new ManualResetEvent(false);
-            ManualResetEvent autoResetEvent4 = new ManualResetEvent(false);
+            var manualEvent = new ManualResetEvent(false);
+            var firstHandlerManualEvent = new ManualResetEvent(false);
+            var secondHandlerManualEvent = new ManualResetEvent(false);
 
-            Task.Run(() =>
+            var feedMessageId = 1;
+            var execAfterException = false;
+            var defaultTimeout = TimeSpan.FromSeconds(10);
+
+            _bus.ConnectHandler<CustomMessage>(x =>
             {
-                var row = session.Get<FeedState.FeedMessage>(1);
-                autoResetEvent1.Set();
-                Console.WriteLine("-- After event1 --- ");
-                using (var transaction = session.BeginTransaction())
+                if (!x.Message.RunFirstHandler) return Task.FromResult(true);
+
+                Assert.True(secondHandlerManualEvent.WaitOne(defaultTimeout));
+
+                var localSession = GetSession();
+                var message = localSession.Get<FeedState.FeedMessage>(feedMessageId);
+
+                using (var transaction = localSession.BeginTransaction())
                 {
-                    try
-                    {
-                        Console.WriteLine("-- After event1 (2)  --- ");
-                        row.ResultDescription = "New Description";
-                        Console.WriteLine("-- After event1 (3) --- ");
-                        session.Update(row);
-                        Console.WriteLine("-- After event1 (4) --- ");
-                        transaction.Commit();
-                        autoResetEvent1.Set();
-                    }
-                    catch (Exception e)
-                    {
-                        transaction.Rollback();
-                    }
-                }
+                    message.ResultDescription = Guid.NewGuid().ToString();
+                    localSession.Update(message);
+                    transaction.Commit();
+
+                    firstHandlerManualEvent.Set();
+                };
+
+                x.Message.RunFirstHandler = false;
+                return Task.FromResult(true);
             });
 
-            Console.WriteLine("autoResetEvent1.WaitOne");
-            Assert.True(autoResetEvent1.WaitOne(TimeSpan.FromSeconds(1)));
-
-            Task.Run(() =>
+            _bus.ConnectHandler<CustomMessage>(x =>
             {
-                var row = session.Get<FeedState.FeedMessage>(1);
-                autoResetEvent2.Set();
-                Console.WriteLine("-- After event2 --- ");
-                using (var transaction = session.BeginTransaction())
+                var localSession = GetSession();
+                var message = localSession.Get<FeedState.FeedMessage>(feedMessageId);
+
+                secondHandlerManualEvent.Set();
+                Assert.True(firstHandlerManualEvent.WaitOne(defaultTimeout));
+
+                using (var transaction = localSession.BeginTransaction())
                 {
-                    try
-                    {
-                        Console.WriteLine("-- After event2 (2) --- ");
-                        row.ResultDescription = "New Description";
-                        Console.WriteLine("-- After event2 (3) --- ");
-                        session.Update(row);
-                        Console.WriteLine("-- After event2 (4) --- ");
-                        transaction.Commit();
-                        Console.WriteLine("-- After event2 (5) --- ");
-                        autoResetEvent2.Set();
-                        Console.WriteLine("-- After event2 (6) --- ");
-                    }
-                    catch (Exception e)
-                    {
-                        Console.WriteLine("-- After event2 (7) --- ");
-                        transaction.Rollback();
-                    }
-                }
+                    message.ResultDescription = Guid.NewGuid().ToString();
+                    localSession.Update(message);
+                    transaction.Commit();
+                };
+
+                execAfterException = true;
+
+                manualEvent.Set();
+
+                return Task.FromResult(true);
             });
 
-            Console.WriteLine("autoResetEvent2.WaitOne");
-            Assert.True(autoResetEvent2.WaitOne(TimeSpan.FromSeconds(1)));
+            await _bus.Publish(new CustomMessage());
 
-            autoResetEvent1.Reset();
+            Assert.True(manualEvent.WaitOne(defaultTimeout));
+            Assert.True(execAfterException);
+        }
+    }
 
-            Assert.True(autoResetEvent1.WaitOne(TimeSpan.FromSeconds(1)));
-
-            autoResetEvent2.Reset();
-
-            Assert.True(autoResetEvent2.WaitOne(TimeSpan.FromSeconds(1)));
-
+    public class CustomMessage
+    {
+        public bool RunFirstHandler { get; set; }
+        public CustomMessage()
+        {
+            RunFirstHandler = true;
         }
     }
 }

@@ -31,6 +31,11 @@ namespace AO.Clients.Amazon.Tests.BusIntegrationTests
 
         }
 
+        protected ISession GetSession()
+        {
+            return SessionFactory.OpenSession(new SqlLiteSessionInterceptor());
+        }
+
         public void Dispose()
         {
             session.Dispose();
